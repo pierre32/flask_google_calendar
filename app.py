@@ -59,6 +59,12 @@ class User(db.Model, UserMixin):
                             backref=db.backref('users', lazy='dynamic'))
 
 
+class Event(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(255))
+    start = db.Column(db.Date())
+
+
 user_datastore = SQLAlchemyUserDatastore(db, User, Role)
 security = Security(app, user_datastore)
 
@@ -103,9 +109,9 @@ def data():
     http_auth = credentials.authorize(httplib2.Http())
     service = build('calendar', 'v3', http_auth)
 
-    now = datetime.datetime.utcnow().isoformat() + 'Z'
-    events_result = service.events().list(calendarId='primary', timeMin=now,
-                                        maxResults=10, singleEvents=True,
+    start = request.args['start']
+    events_result = service.events().list(calendarId='primary', timeMin=start,
+                                        maxResults=100, singleEvents=True,
                                         orderBy='startTime').execute()
     events = events_result.get('items', [])
     events = [
