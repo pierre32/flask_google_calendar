@@ -1,6 +1,7 @@
 import datetime
 import os
 import httplib2
+import json
 
 from dotenv import load_dotenv
 from flask import Flask, render_template, session, redirect, url_for, request
@@ -92,7 +93,13 @@ def calendar():
     credentials = client.OAuth2Credentials.from_json(session['credentials'])
     if credentials.access_token_expired:
         return redirect(url_for('oauth2callback'))
+    return render_template('calendar.html')
 
+
+@app.route('/data')
+@login_required
+def data():
+    credentials = client.OAuth2Credentials.from_json(session['credentials'])
     http_auth = credentials.authorize(httplib2.Http())
     service = build('calendar', 'v3', http_auth)
 
@@ -101,13 +108,13 @@ def calendar():
                                         maxResults=10, singleEvents=True,
                                         orderBy='startTime').execute()
     events = events_result.get('items', [])
-
-    if not events:
-        print('No upcoming events found.')
-    for event in events:
-        start = event['start'].get('dateTime', event['start'].get('date'))
-        print(start, event['summary'])
-    return render_template('index.html')
+    events = [
+        {
+            'title': event['summary'],
+            'start': event['start'].get('dateTime', event['start'].get('date'))
+        } for event in events
+    ]
+    return json.dumps(events)
 
 
 if __name__ == '__main__':
