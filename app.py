@@ -11,6 +11,7 @@ from flask_security import Security, SQLAlchemyUserDatastore, UserMixin, RoleMix
 from flask_mail import Mail
 from googleapiclient.discovery import build
 from oauth2client import client
+from sqlalchemy.exc import IntegrityError
 
 
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
@@ -63,6 +64,10 @@ class Event(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(255))
     start = db.Column(db.Date())
+    created_at = db.Column(db.DateTime())
+    __table_args__ = (
+        db.UniqueConstraint('title', 'start'),
+    )
 
 
 user_datastore = SQLAlchemyUserDatastore(db, User, Role)
@@ -77,7 +82,7 @@ def index():
 @app.route('/oauth2callback')
 def oauth2callback():
     flow = client.flow_from_clientsecrets(
-        'credentials.json',
+        'client_secrets.json',
         scope='https://www.googleapis.com/auth/calendar',
         redirect_uri=url_for('oauth2callback', _external=True)
     )
@@ -110,14 +115,36 @@ def data():
     service = build('calendar', 'v3', http_auth)
 
     start = request.args['start']
-    events_result = service.events().list(calendarId='primary', timeMin=start,
-                                        maxResults=100, singleEvents=True,
-                                        orderBy='startTime').execute()
-    events = events_result.get('items', [])
+    start = datetime.datetime.fromisoformat(start)
+    old_threshold = datetime.datetime.now() - datetime.timedelta(minutes=1)
+    events = Event.query.filter(Event.start > start, Event.created_at > old_threshold).all()
+
+    if not events:
+        start = start.isoformat()
+        events_result = service.events().list(calendarId='primary', timeMin=start,
+                                            maxResults=100, singleEvents=True,
+                                            orderBy='startTime').execute()
+        events = events_result.get('items', [])
+        for event in events:
+            event_start = event['start'].get('dateTime', event['start'].get('date'))
+            event_start = datetime.datetime.fromisoformat(start).date()
+            try:
+                db.session.add(
+                    Event(
+                        title=event['summary'],
+                        start=event_start,
+                        created_at=datetime.datetime.now()
+                    )
+                )
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+
+    events = Event.query.filter(Event.start > start).all()
     events = [
         {
-            'title': event['summary'],
-            'start': event['start'].get('dateTime', event['start'].get('date'))
+            'title': event.title,
+            'start': event.start.isoformat()
         } for event in events
     ]
     return json.dumps(events)
